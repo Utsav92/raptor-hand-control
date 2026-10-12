@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Raptor · left-hand control</title>
+  <link rel="stylesheet" href="./controls.css">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <header class="app-header"><span>RAPTOR / ENGINE LAB</span><span class="text-small">Local computer vision · no video uploads</span></header>
+  <main class="app-layout">
+    <section class="model-column" aria-label="Raptor engine explainer"><!-- ENGINE --></section>
+    <aside class="hand-column" aria-labelledby="hand-title">
+      <h2 id="hand-title">Your left hand is the controller</h2>
+      <p class="text-muted">Open your hand to explode the engine. Close it to assemble. Turn your palm to rotate; move your hand to reposition.</p>
+      <div class="camera-preview"><video id="hand-video" autoplay playsinline muted aria-label="Mirrored camera preview"></video><canvas id="hand-overlay" width="640" height="480" aria-label="Detected hand landmarks"></canvas><div id="camera-placeholder">Camera off</div></div>
+      <div class="camera-actions"><button id="camera-start" class="btn btn-primary" type="button" disabled>Start camera</button><button id="camera-stop" class="btn" type="button" disabled>Stop</button></div>
+      <p id="hand-status" role="status" aria-live="polite">Loading hand tracker…</p>
+      <div class="hand-readings"><span>Gesture <strong id="hand-gesture">—</strong></span><span>Open <strong id="hand-open">—</strong></span></div>
+      <label class="form-label" for="hand-target">Move and rotate</label>
+      <select id="hand-target" class="form-select"><option value="engine">Whole engine</option><option value="part">Selected assembly</option></select>
+      <p class="text-small text-muted" id="target-help">All assemblies move together. Open/close always controls the full exploded view.</p>
+      <div class="camera-actions"><button id="hand-recenter" class="btn" type="button">Recenter hand</button><button id="hand-reset" class="btn btn-ghost" type="button">Reset view</button></div>
+      <label class="form-check"><input id="hand-swap" class="form-check-input" type="checkbox"><span class="form-check-label">Swap left/right labels</span></label>
+      <p class="text-small text-muted">Use the swap option if your camera already mirrors its image. Keep your wrist and fingertips visible. Tracking loss freezes the view; mouse controls still work.</p>
+      <details><summary>How the controls work</summary><p>Hold an open palm for a moment to separate the assemblies, or a fist to reassemble them. Intermediate finger positions preserve the last stable state.</p><p>When tracking begins, your palm position becomes the neutral pose. Turning it shows other sides of the engine; tilting it changes elevation. Moving left, right, up or down moves the model. Moving closer or farther changes its depth.</p><p>Choose “Selected assembly,” then choose a part under Inspect, to manipulate that part independently. Changing the selected part recenters the hand automatically.</p><p>Camera frames are processed on this computer in a worker. Neither frames nor landmarks are sent to a server. Stop turns off the camera.</p></details>
+      <p class="text-small text-muted">Tracking: <a href="https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js" target="_blank" rel="noreferrer">MediaPipe Hand Landmarker</a> · geometry and performance remain educational approximations.</p>
+    </aside>
+  </main>
+  <script type="module" src="./hand-control.js"></script>
+</body>
+</html>

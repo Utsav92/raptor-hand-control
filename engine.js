@@ -1,0 +1,160 @@
+(function(){
+ 'use strict';
+ const root=document.getElementById('raptor-lab'),$=s=>root.querySelector(s);
+ const state={throttle:80,mix:3.6,ambient:101.3,expansion:35,cooling:85,gimbal:0,explode:0,cut:true,labels:true,mode:'flow',part:'chamber',play:false};
+ let renderer;
+ try{if(!window.THREE)throw new Error('The 3D library could not load.');renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});}
+ catch(e){$('#r-error').hidden=false;$('#r-error').textContent=e.message+' WebGL and access to the approved CDN are required for this 3D view.';return;}
+ const T=THREE,stage=$('#r-stage'),scene=new T.Scene(),camera=new T.PerspectiveCamera(34,1,.1,100);
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.outputColorSpace=T.SRGBColorSpace;$('#r-canvas').appendChild(renderer.domElement);
+ renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','Interactive conceptual Raptor engine: two preburners, two turbine and pump assemblies, injector, chamber, cooled nozzle, valves and feed lines. Use the Inspect menu for accessible part explanations.');
+ scene.add(new T.HemisphereLight(0xffffff,0x677080,2.1));
+ const key=new T.DirectionalLight(0xffffff,3.5);key.position.set(3,6,7);scene.add(key);
+ const fill=new T.DirectionalLight(0xffffff,1.8);fill.position.set(-4,1,-5);scene.add(fill);
+ const pivot=new T.Group(),engine=new T.Group();const modelTransform=new T.Group();scene.add(modelTransform);modelTransform.add(pivot);pivot.add(engine);pivot.position.y=3.95;engine.position.y=-3.95;
+ const parts=[],byId={},pickables=[],rotors=[],paths=[],bolts=[],heatMeshes=[];
+ let palette={},physics={},yaw=.42,pitch=.12,distance=14.8,zoomFactor=1,explodeNow=0,lastTime=0,flowTime=0,dirty=true,disposed=false;
+ const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ function cssColor(name){const probe=document.createElement('span');probe.style.color='var('+name+')';root.appendChild(probe);const s=getComputedStyle(probe).color;probe.remove();const channels=(s.match(/[\d.]+/g)||[]).map(Number);if(channels.length===4){const c=new T.Color('rgb('+channels.slice(0,3).join(',')+')');if(channels[3]<1&&name!=='--background')c.lerp(cssColor('--background'),1-channels[3]);return c;}return new T.Color(s);}
+ function colors(){palette={metal:cssColor('--muted-foreground'),dark:cssColor('--border'),fuel:cssColor('--viz-series-1'),oxy:cssColor('--viz-series-2'),hot:cssColor('--viz-series-3'),cool:cssColor('--viz-series-1'),warm:cssColor('--viz-series-3'),severe:cssColor('--viz-series-4'),text:cssColor('--foreground')};dirty=true;}
+ colors();
+ function material(kind='metal',extra={}){const m=new T.MeshStandardMaterial({color:palette[kind]||palette.metal,metalness:kind==='metal'?.75:.4,roughness:.35,...extra});m.userData.kind=kind;return m;}
+ function mesh(g,geo,kind='metal',extra={}){const m=new T.Mesh(geo,material(kind,extra));g.add(m);pickables.push(m);return m;}
+ function part(id,name,short,pos,offset,detail){const g=new T.Group();g.position.set(...pos);engine.add(g);const p={id,name,short,g,base:new T.Vector3(...pos),offset:new T.Vector3(...offset),detail,anchor:new T.Vector3(0,0,0)};g.userData.part=id;parts.push(p);byId[id]=p;return g;}
+ function cyl(g,r,h,y=0,kind='metal'){const m=mesh(g,new T.CylinderGeometry(r,r,h,48),kind);m.position.y=y;return m;}
+ function ring(g,r,y,t=.035,kind='metal'){const m=mesh(g,new T.TorusGeometry(r,t,10,64),kind);m.rotation.x=Math.PI/2;m.position.y=y;return m;}
+ function tube(g,pts,r=.065,kind='metal',flow=false){const curve=new T.CatmullRomCurve3(pts.map(p=>new T.Vector3(...p)),false,'centripetal');const m=mesh(g,new T.TubeGeometry(curve,Math.max(20,pts.length*9),r,8,false),kind);if(flow)addFlow(g,curve,kind);return m;}
+ function addFlow(g,curve,kind,count=9){const dots=[];for(let i=0;i<count;i++){const m=new T.Mesh(new T.SphereGeometry(.057,8,6),new T.MeshBasicMaterial({color:palette[kind],transparent:true,opacity:.95}));g.add(m);dots.push(m);}paths.push({g,curve,kind,dots});}
+ function flange(g,r,y){ring(g,r,y,.045);for(let i=0;i<12;i++){const a=i*Math.PI/6,m=mesh(g,new T.CylinderGeometry(.034,.034,.06,6));m.position.set(r*Math.cos(a),y,r*Math.sin(a));bolts.push(m);}}
+ function lathe(points,cut=false){return new T.LatheGeometry(points.map(p=>new T.Vector2(...p)),72,cut?Math.PI*.78:0,cut?Math.PI*1.5:Math.PI*2);}
+ function rotor(g,y,r){const spin=new T.Group();spin.position.y=y;g.add(spin);cyl(spin,.07,.15,0,'dark');for(let i=0;i<18;i++){const a=i*Math.PI/9,m=mesh(spin,new T.BoxGeometry(r*.55,.055,.10),'metal');m.position.set(Math.cos(a)*r*.64,0,Math.sin(a)*r*.64);m.rotation.y=-a+.55;}rotors.push(spin);return spin;}
+ // Mount, gimballing hardware, and feed fittings are represented as functional assemblies.
+ let g=part('mount','Thrust mount & gimbal bearing','Mount',[0,4.05,0],[0,1.15,0],'Transfers engine thrust into the vehicle; the gimbal bearing lets steering actuators tilt the engine.');
+ ring(g,.53,0,.115);cyl(g,.20,.25,.15,'dark');for(let i=0;i<3;i++){let a=i*2*Math.PI/3;tube(g,[[.48*Math.cos(a),0,.48*Math.sin(a)],[.6*Math.cos(a),-.55,.6*Math.sin(a)],[.37*Math.cos(a),-1,.37*Math.sin(a)]],.065);}
+ g=part('fuelFeed','Methane inlet & main valve','CH₄ inlet',[-1.85,3.85,.1],[-.85,.7,.1],'Liquid methane enters from the vehicle tank; the main valve meters fuel and isolates the engine during shutdown.');
+ cyl(g,.17,.27);flange(g,.21,.16);tube(g,[[0,-.16,0],[0,-1.8,0],[.82,-2.3,0]],.115,'fuel',true);cyl(g,.19,.30,-.55,'dark');const fv=mesh(g,new T.BoxGeometry(.15,.25,.16));fv.position.set(.24,-.55,0);
+ g=part('oxyFeed','Oxygen inlet & main valve','O₂ inlet',[1.85,3.85,-.12],[.85,.7,-.1],'Liquid oxygen enters from the tank; the main oxidizer valve meters oxygen and isolates the feed system.');
+ cyl(g,.21,.30);flange(g,.25,.18);tube(g,[[0,-.18,0],[0,-1.8,0],[-.82,-2.3,0]],.14,'oxy',true);cyl(g,.22,.32,-.55,'dark');const ov=mesh(g,new T.BoxGeometry(.15,.25,.16));ov.position.set(-.27,-.55,0);
+ for(const side of [-1,1]){
+  const fuel=side===-1,k=fuel?'fuel':'oxy',word=fuel?'Methane':'Oxygen';
+  g=part(k+'Pump',word+' pump & impeller',fuel?'CH₄ pump':'O₂ pump',[side*1.03,1.55,0],[side*1.3,-.1,side*.3],'The '+word.toLowerCase()+' pump raises liquid propellant pressure above chamber pressure; its impeller is mechanically coupled to the turbine.');
+  const housing=cyl(g,.36,.42,0,k);housing.userData.shell=true;ring(g,.365,.20,.04);ring(g,.365,-.20,.04);rotor(g,0,.31);cyl(g,.055,.63,.30,'dark');
+  g=part(k+'Turbine',(fuel?'Fuel-rich':'Oxygen-rich')+' turbine & shaft',fuel?'Fuel turbine':'O₂ turbine',[side*1.03,2.2,0],[side*1.35,.35,side*.3],(fuel?'Fuel-rich':'Oxygen-rich')+' preburner gas expands across turbine blades, turning the shared shaft that drives the '+word.toLowerCase()+' pump.');
+  const th=cyl(g,.32,.42,0,k);th.userData.shell=true;flange(g,.34,.24);flange(g,.34,-.24);rotor(g,0,.28);cyl(g,.055,.66,-.20,'dark');
+  g=part(k+'PB',(fuel?'Fuel-rich':'Oxygen-rich')+' preburner',fuel?'Fuel preburner':'O₂ preburner',[side*1.03,3.0,0],[side*.7,.85,0],fuel?'Most methane mixes with a small oxygen branch: partial combustion makes hot, fuel-rich gas to power the fuel turbine.':'Most oxygen mixes with a small methane branch: partial combustion makes hot, oxygen-rich gas to power the oxygen turbine.');
+  const body=cyl(g,.25,.59,0,k);body.userData.shell=true;const dome=mesh(g,new T.SphereGeometry(.247,32,16),k);dome.scale.y=1.25;dome.userData.shell=true;flange(g,.265,-.3);flange(g,.265,.3);tube(g,[[0,-.29,0],[0,-.59,0]],.13,k,true);heatMeshes.push(body);
+ }
+ g=part('cross','Cross-feed lines & preburner valves','Cross-feeds',[0,0,0],[0,.55,-1.5],'Small cross-feeds send oxygen to the fuel-rich preburner and methane to the oxygen-rich preburner; their valves regulate each turbine circuit.');
+ tube(g,[[1.03,1.55,-.15],[1.45,1.75,-.45],[1.45,3.45,-.45],[-.75,3.45,-.45],[-1.03,3.1,0]],.055,'oxy',true);
+ tube(g,[[-1.03,1.55,.15],[-1.45,1.8,.50],[-1.45,3.60,.50],[.70,3.60,.50],[1.03,3.10,0]],.055,'fuel',true);
+ for(let s of [-1,1]){const v=cyl(g,.105,.18,3.47,s<0?'oxy':'fuel');v.position.x=s*.5;v.position.z=s<0?-.45:.5;}byId.cross.anchor.set(0,3.47,.5);
+ g=part('ducts','Turbine discharge ducts','Gas ducts',[0,0,0],[0,.30,1.3],'Both turbine exhaust streams enter the main injector; their remaining fuel and oxygen burn in the chamber instead of being dumped overboard.');
+ tube(g,[[-1.03,2.15,.22],[-.8,2.10,.6],[-.45,1.85,.5],[-.3,1.67,0]],.13,'fuel',true);
+ tube(g,[[1.03,2.15,.22],[.8,2.10,.6],[.45,1.85,.5],[.3,1.67,0]],.15,'oxy',true);byId.ducts.anchor.set(.7,2.1,.6);
+ g=part('injector','Main injector & manifolds','Injector',[0,1.55,0],[0,.65,0],'The injector distributes the two gaseous streams through many small elements, mixing them for stable main-chamber combustion.');
+ cyl(g,.49,.20,0,'dark');flange(g,.49,.12);ring(g,.35,.13,.06,'fuel');ring(g,.23,.13,.045,'oxy');
+ for(let i=0;i<70;i++){const a=i*2.399963,r=.42*Math.sqrt((i+.5)/70),m=mesh(g,new T.CylinderGeometry(.014,.014,.035,6),i%2?'fuel':'oxy');m.position.set(r*Math.cos(a),-.12,r*Math.sin(a));}
+ g=part('chamber','Main combustion chamber','Chamber',[0,1.08,0],[0,.1,0],'Fuel-rich and oxygen-rich gases finish burning here; high-pressure hot gas then accelerates toward the nozzle throat.');
+ const chamber=mesh(g,lathe([[.46,-.48],[.49,-.27],[.49,.31],[.45,.38]]),'metal',{side:T.DoubleSide});chamber.userData.shell=true;heatMeshes.push(chamber);flange(g,.49,.35);flange(g,.46,-.44);
+ const flame=mesh(g,new T.CylinderGeometry(.38,.25,.70,36),'hot',{transparent:true,opacity:.55,metalness:0});flame.userData.inner=true;
+ g=part('throat','Convergent section & nozzle throat','Throat',[0,.35,0],[0,-.30,0],'The narrow throat chokes the gas at Mach 1; downstream expansion accelerates it to supersonic speed.');
+ const throat=mesh(g,lathe([[.46,.3],[.41,.2],[.30,.08],[.23,-.05],[.21,-.15],[.23,-.27]]),'metal',{side:T.DoubleSide});throat.userData.shell=true;heatMeshes.push(throat);
+ g=part('nozzle','Divergent bell nozzle','Nozzle',[0,0,0],[0,-1.15,0],'The bell turns thermal energy into exhaust velocity; a larger exit area helps in vacuum but can overexpand the gas at sea level.');
+ const nozzle=mesh(g,new T.BufferGeometry(),'metal',{side:T.DoubleSide});nozzle.userData.shell=true;heatMeshes.push(nozzle);
+ const exitRing=ring(g,1.05,-1.85,.045);const throatRing=ring(g,.23,.08,.025);byId.nozzle.anchor.set(.65,-1.35,0);
+ g=part('cooling','Regenerative cooling jacket & manifold','Cooling jacket',[0,0,0],[0,0,-1.8],'Methane passes through wall channels before its preburner, absorbing heat from the nozzle and chamber; cooling protects the metal without directly adding thrust.');
+ const coolingLines=new T.Group();g.add(coolingLines);const coolIn=tube(g,[[-1.03,1.45,-.2],[-1.4,.3,-.3],[-1.3,-1.7,-.3],[-.6,-1.85,-.6]],.085,'fuel',true);
+ tube(g,[[.45,1.25,-.10],[-.50,1.35,-.4],[-1.15,2.7,-.25],[-1.03,3.0,0]],.10,'fuel',true);byId.cooling.anchor.set(-.65,-.6,-.3);
+ g=part('oxyDuct','Oxygen pump discharge line','O₂ discharge',[0,0,0],[1.1,0,-1.2],'Pressurized oxygen flows from the oxygen pump to the oxygen-rich preburner; a small branch supplies the fuel-rich preburner.');
+ tube(g,[[1.03,1.45,-.2],[1.5,1.4,-.4],[1.5,2.8,-.4],[1.03,3,0]],.105,'oxy',true);byId.oxyDuct.anchor.set(1.5,2.65,-.4);
+ g=part('ignition','Ignition system (schematic)','Ignition',[.52,1.05,.1],[.7,.3,1.1],'Ignition hardware starts combustion in the preburners and main chamber; exact placement and implementation vary by Raptor version.');
+ const ign=cyl(g,.08,.3,0,'dark');ign.rotation.z=Math.PI/2;tube(g,[[.12,0,0],[.25,.15,.2],[.18,.6,.35]],.024,'dark');
+ g=part('actuators','Gimbal actuators','Actuators',[0,0,0],[0,0,1.5],'Actuators tilt a steerable engine; thrust stays aligned with the engine axis, creating a sideways force component to steer the vehicle.');
+ for(let s of [-1,1])tube(g,[[s*.44,4,0],[s*.70,3.10,.3],[s*.62,1.65,.35]],.065,'dark');byId.actuators.anchor.set(.7,2.6,.3);
+ g=part('sensors','Sensors, controls & wiring (schematic)','Controls',[-.65,2.65,.55],[-.65,.25,1.1],'Pressure, temperature and speed sensing feed engine control; the controller coordinates valves, ignition and shutdown.');
+ mesh(g,new T.BoxGeometry(.22,.30,.13),'dark');for(let s of [-1,1])tube(g,[[0,0,0],[s*.2,-.4,.1],[s*.2,-1.5,.1]],.018,'dark');
+ // Exhaust is a separate visual mark, not an assembly.
+ const plume=new T.Group();engine.add(plume);plume.position.y=-1.88;
+ const plumeShell=new T.Mesh(new T.BufferGeometry(),new T.MeshBasicMaterial({color:palette.hot,transparent:true,opacity:.13,side:T.DoubleSide,depthWrite:false}));plume.add(plumeShell);
+ const plumeCore=new T.Mesh(new T.BufferGeometry(),new T.MeshBasicMaterial({color:palette.hot,transparent:true,opacity:.22,side:T.DoubleSide,depthWrite:false}));plume.add(plumeCore);
+ const exhaustDots=[];for(let i=0;i<100;i++){const dot=new T.Mesh(new T.SphereGeometry(.018,5,4),new T.MeshBasicMaterial({color:palette.hot,transparent:true,opacity:.6}));plume.add(dot);exhaustDots.push(dot);}
+ const diamonds=new T.Group();plume.add(diamonds);for(let i=0;i<5;i++){const m=new T.Mesh(new T.ConeGeometry(.32,.5,24),new T.MeshBasicMaterial({color:palette.hot,transparent:true,opacity:.1,wireframe:true,depthWrite:false}));m.position.y=-.4-i*.48;diamonds.add(m);}
+ const axis=new T.ArrowHelper(new T.Vector3(0,1,0),new T.Vector3(2.3,-2.5,0),1.2,palette.text.getHex(),.16,.09);engine.add(axis);
+ const guides=new T.Group();engine.add(guides);
+ parts.forEach((p,i)=>{
+  p.number=i+1;
+  const opt=document.createElement('option');opt.value=p.id;opt.textContent=String(p.number).padStart(2,'0')+' · '+p.name;$('#r-part').appendChild(opt);
+  const tag=document.createElement('div');tag.className='r-tag text-small cursor-interaction';tag.innerHTML='<span class="r-tag-text">'+String(p.number).padStart(2,'0')+'<span class="r-tag-name"> '+p.short+'</span></span>';tag.addEventListener('click',()=>select(p.id,true));$('#r-tags').appendChild(tag);p.tag=tag;
+  const line=new T.Line(new T.BufferGeometry().setFromPoints([p.base,p.base]),new T.LineDashedMaterial({color:palette.dark,dashSize:.1,gapSize:.08,transparent:true,opacity:.5}));guides.add(line);p.guide=line;
+ });
+ function nozzlePoints(){const re=.21*Math.sqrt(state.expansion);return [[.23,.08],[.25,-.1],[.35,-.36],[.51,-.68],[re*.68,-1.06],[re*.86,-1.45],[re,-1.85]];}
+ function replaceGeometry(m,geo){m.geometry.dispose();m.geometry=geo;}
+ function rebuildNozzle(){const profile=nozzlePoints();replaceGeometry(nozzle,lathe(profile,state.cut));const re=profile[profile.length-1][0];exitRing.scale.set(re/1.05,re/1.05,1);for(let i=paths.length-1;i>=0;i--)if(paths[i].regen)paths.splice(i,1);coolingLines.children.slice().forEach(m=>{m.geometry.dispose();m.material.dispose();coolingLines.remove(m);});
+  for(let i=0;i<32;i++){const a=i*Math.PI/16;if(state.cut&&Math.sin(a)>.55)continue;const pts=profile.slice().reverse().map(([r,y])=>[(r+.025)*Math.cos(a),y,(r+.025)*Math.sin(a)]);pts.push([.49*Math.cos(a),.64,.49*Math.sin(a)],[.51*Math.cos(a),1.25,.51*Math.sin(a)]);const curve=new T.CatmullRomCurve3(pts.map(p=>new T.Vector3(...p)));const line=new T.Mesh(new T.TubeGeometry(curve,24,.012,4,false),material('fuel'));coolingLines.add(line);if(i%8===0){addFlow(coolingLines,curve,'fuel',5);paths[paths.length-1].regen=true;}}
+  byId.nozzle.anchor.x=re*.7;
+ }
+ function areaMach(M,gamma){return 1/M*Math.pow(2/(gamma+1)*(1+(gamma-1)/2*M*M),(gamma+1)/(2*(gamma-1)));}
+ function calculate(s){const gamma=1.22,gasR=360,Pc=25e6*s.throttle/100,temp=3350+300*Math.exp(-Math.pow((s.mix-4)/.65,2));let lo=1.001,hi=12;for(let i=0;i<65;i++){let mid=(lo+hi)/2;if(areaMach(mid,gamma)>s.expansion)hi=mid;else lo=mid;}const M=(lo+hi)/2,Te=temp/(1+(gamma-1)/2*M*M),pe=Pc*Math.pow(Te/temp,gamma/(gamma-1)),v=M*Math.sqrt(gamma*gasR*Te),At=.075,Ae=At*s.expansion;const mdot=Pc*At*Math.sqrt(gamma/(gasR*temp))*Math.pow(2/(gamma+1),(gamma+1)/(2*(gamma-1)));const F=mdot*v+(pe-s.ambient*1000)*Ae,heat=Math.pow(Pc/20e6,.8)*(temp/3564)*(1-s.cooling/125);return{Pc,temp,pe,v,mdot,F,heat,ratio:pe/Math.max(100,s.ambient*1000),M};}
+ const baseline=calculate({...state});
+ function updatePhysics(changed){physics=calculate(state);$('#r-pc').textContent=(physics.Pc/1e5).toFixed(0)+' bar';$('#r-thrust').textContent=(physics.F/baseline.F*100).toFixed(0);$('#r-wall').textContent=(physics.heat/baseline.heat*100).toFixed(0);const angle=state.gimbal*Math.PI/180;$('#r-vector').textContent='Axial '+(100*Math.cos(angle)).toFixed(1)+'% · lateral '+(100*Math.sin(angle)).toFixed(1)+'% of thrust';
+  let regime=state.ambient<.1?'Vacuum expansion':physics.ratio>1.2?'Underexpanded':physics.ratio<.8?'Overexpanded':'Near pressure match';$('#r-regime').textContent=regime+' · exit pressure '+(physics.pe/1000).toFixed(1)+' kPa';
+  const messages={throttle:'Higher throttle raises chamber pressure and propellant flow: pumps spin faster, the plume gains intensity and wall heat load rises.',mix:'O/F changes the oxygen–fuel split and the illustrative combustion temperature. Stoichiometric methane combustion is O/F = 4; real performance optima depend on chemistry.',ambient:'Lower ambient pressure reduces the opposing pressure force and lets the plume spread; ideal thrust rises without increasing chamber pressure.',expansion:'A larger exit area accelerates gas further and lowers exit pressure. At high ambient pressure, overexpansion can reduce thrust and cause separation.',cooling:'More effective cooling reduces the wall-load tint. This independent teaching control does not predict coolant temperature, damage or real hardware limits.',gimbal:'Tilting the engine redirects thrust: the sideways component grows while the component along the vehicle axis decreases.'};
+  $('#r-response').textContent=messages[changed]||'Adjust a parameter to see flow, nozzle geometry, plume expansion, wall heat load or thrust direction change.';
+  if(physics.ratio<.4&&state.ambient>1)$('#r-regime').textContent+=' · separation risk; ideal thrust less reliable';
+  const re=.21*Math.sqrt(state.expansion),spread=state.ambient<.1?1.15:Math.min(1.05,Math.max(.04,Math.log(physics.ratio)*.16+.19));const len=1.4+state.throttle*.015;
+  replaceGeometry(plumeShell,lathe([[re*.9,0],[re*.85+spread*.4,-len*.35],[re*.5+spread,-len]],false));replaceGeometry(plumeCore,lathe([[re*.45,0],[re*.32+spread*.32,-len*.45],[.03+spread*.30,-len*.95]],false));plumeShell.material.opacity=.06+state.throttle*.0012;diamonds.visible=state.ambient>20&&physics.ratio>.5&&physics.ratio<8;plume.userData.len=len;plume.userData.spread=spread;dirty=true;
+ }
+ function recolor(){for(const p of parts)p.g.traverse(m=>{if(!m.isMesh||!m.material.userData.kind)return;let k=m.material.userData.kind;let c=palette[k]||palette.metal;if(state.mode==='heat'){const hotPart=['chamber','throat','nozzle'].includes(p.id);if(hotPart){const q=Math.min(2.5,physics.heat/baseline.heat);c=palette.cool.clone().lerp(palette.warm,Math.min(1,q*.7));if(q>1.4)c.lerp(palette.severe,Math.min(1,(q-1.4)/1.1));}else if(p.id.endsWith('PB')||p.id.endsWith('Turbine'))c=palette.warm.clone().lerp(palette.metal,.6);else c=palette.metal;}m.material.color.copy(c);m.material.emissive.copy(p.id===state.part?palette.text:c);m.material.emissiveIntensity=p.id===state.part?.22:state.mode==='heat'&&['chamber','throat'].includes(p.id)?.10:0;if(m.userData.shell){m.material.transparent=state.cut;m.material.opacity=state.cut?.22:1;m.material.depthWrite=!state.cut;}if(m.userData.inner)m.visible=state.cut;});paths.forEach(p=>p.dots.forEach(d=>d.material.color.copy(palette[p.kind])));[plumeShell,plumeCore,...exhaustDots,...diamonds.children].forEach(m=>m.material.color.copy(palette.hot));axis.setColor(palette.text);parts.forEach(p=>p.guide.material.color.copy(palette.dark));$('.r-legend').innerHTML=state.mode==='heat'?'<span><i class="r-swatch r-fuel"></i>Lower wall load</span><span><i class="r-swatch r-hot"></i>Higher wall load</span><span><i class="r-swatch" style="background:var(--viz-series-4)"></i>Highest wall load</span>':'<span><i class="r-swatch r-fuel"></i>CH₄ / fuel-rich gas</span><span><i class="r-swatch r-oxy"></i>O₂ / oxygen-rich gas</span><span><i class="r-swatch r-hot"></i>Main combustion</span>';dirty=false;}
+ function select(id,saveIt){if(!byId[id])return;state.part=id;$('#r-part').value=id;$('#r-detail').textContent=byId[id].detail;parts.forEach(p=>p.tag.classList.toggle('is-active',p.id===id));dirty=true;if(saveIt)save();}
+ function save(){if(window.openai&&window.openai.setWidgetState)window.openai.setWidgetState({modelContent:{engine:'Conceptual SpaceX Raptor',selectedAssembly:byId[state.part].name,parameters:{throttlePercent:state.throttle,oxygenMethaneRatio:state.mix,ambientKPa:state.ambient,expansionRatio:state.expansion,coolingPercent:state.cooling,gimbalDegrees:state.gimbal},view:state.explode?'exploded':'assembled',colorMode:state.mode,cutaway:state.cut},privateContent:{...state,yaw,pitch,zoomFactor}}).catch(()=>{});}
+ const units={throttle:'%',mix:' : 1',ambient:' kPa',expansion:'',cooling:'%',gimbal:'°'};
+ function values(){for(let k of Object.keys(units)){$('#r-'+k).value=state[k];$('#r-'+k+'-v').textContent=(k==='mix'?state[k].toFixed(2):k==='ambient'||k==='gimbal'?state[k].toFixed(1):state[k])+units[k];}}
+ function viewButtons(){root.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',Number(b.dataset.view)===state.explode?'true':'false'));}
+ for(let k of Object.keys(units))$('#r-'+k).addEventListener('input',()=>{state[k]=Number($('#r-'+k).value);values();if(k==='expansion')rebuildNozzle();if(k==='cooling'||k==='mix'){$('#r-mode').value='heat';state.mode='heat';}updatePhysics(k);save();});
+ root.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{state.explode=Number(b.dataset.view);viewButtons();save();}));
+ $('#r-cut').addEventListener('change',()=>{state.cut=$('#r-cut').checked;replaceGeometry(chamber,lathe([[.46,-.48],[.49,-.27],[.49,.31],[.45,.38]],state.cut));replaceGeometry(throat,lathe([[.46,.3],[.41,.2],[.30,.08],[.23,-.05],[.21,-.15],[.23,-.27]],state.cut));rebuildNozzle();dirty=true;save();});
+ $('#r-labels').addEventListener('change',()=>{state.labels=$('#r-labels').checked;save();});
+ $('#r-mode').addEventListener('change',()=>{state.mode=$('#r-mode').value;dirty=true;save();});
+ $('#r-part').addEventListener('change',()=>select($('#r-part').value,true));
+ $('#r-play').addEventListener('click',()=>{state.play=!state.play;$('#r-play').textContent=state.play?'Pause flow':'Animate flow';$('#r-play').setAttribute('aria-pressed',String(state.play));save();});
+ function restore(s){if(!s||typeof s!=='object')return;for(let k of Object.keys(units)){let el=$('#r-'+k),v=Number(s[k]);if(Number.isFinite(v))state[k]=Math.max(Number(el.min),Math.min(Number(el.max),v));}['cut','labels','play'].forEach(k=>{if(typeof s[k]==='boolean')state[k]=s[k];});if(s.explode===0||s.explode===1)state.explode=s.explode;if(['flow','heat'].includes(s.mode))state.mode=s.mode;if(byId[s.part])state.part=s.part;if(Number.isFinite(s.yaw))yaw=s.yaw;if(Number.isFinite(s.pitch))pitch=Math.max(-1.1,Math.min(1.1,s.pitch));if(Number.isFinite(s.zoomFactor))zoomFactor=Math.max(.55,Math.min(2,s.zoomFactor));values();viewButtons();$('#r-cut').checked=state.cut;$('#r-labels').checked=state.labels;$('#r-mode').value=state.mode;$('#r-play').textContent=state.play?'Pause flow':'Animate flow';$('#r-play').setAttribute('aria-pressed',String(state.play));replaceGeometry(chamber,lathe([[.46,-.48],[.49,-.27],[.49,.31],[.45,.38]],state.cut));replaceGeometry(throat,lathe([[.46,.3],[.41,.2],[.30,.08],[.23,-.05],[.21,-.15],[.23,-.27]],state.cut));select(state.part,false);rebuildNozzle();updatePhysics();}
+ const saved=window.openai&&window.openai.widgetState;restore(saved&&saved.privateContent);window.addEventListener('openai:set_globals',e=>{const s=e.detail&&e.detail.globals&&e.detail.globals.widgetState;if(s)restore(s.privateContent);});
+ const pointers=new Map();let startDrag=null,pinchDistance=0,dragMoved=false;
+ function pointerDown(e){pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});renderer.domElement.setPointerCapture(e.pointerId);dragMoved=false;startDrag={x:e.clientX,y:e.clientY};if(pointers.size===2){const a=[...pointers.values()];pinchDistance=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);}}
+ renderer.domElement.addEventListener('pointerdown',pointerDown);
+ renderer.domElement.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;const prev=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===2){const a=[...pointers.values()],dist=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinchDistance>0)zoomFactor=Math.max(.55,Math.min(2,zoomFactor*pinchDistance/dist));pinchDistance=dist;dragMoved=true;}else{yaw-=(e.clientX-prev.x)*.007;pitch=Math.max(-1.1,Math.min(1.1,pitch+(e.clientY-prev.y)*.005));if(startDrag&&Math.hypot(e.clientX-startDrag.x,e.clientY-startDrag.y)>5)dragMoved=true;}});
+ const ray=new T.Raycaster();renderer.domElement.addEventListener('pointerup',e=>{pointers.delete(e.pointerId);if(!dragMoved&&startDrag){const rect=renderer.domElement.getBoundingClientRect();ray.setFromCamera(new T.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),camera);const hit=ray.intersectObjects(pickables,false).find(h=>h.object.visible);if(hit){let o=hit.object;while(o&&!o.userData.part)o=o.parent;if(o)select(o.userData.part,false);}}startDrag=null;save();});
+ renderer.domElement.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);startDrag=null;});
+ renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();zoomFactor=Math.max(.55,Math.min(2,zoomFactor*Math.exp(e.deltaY*.001)));save();},{passive:false});
+ const wholePose={position:new T.Vector3(),rotation:new T.Quaternion()};
+ const partPose=new Map();
+ root.raptorHandControl={
+  setExplosion(value){state.explode=Math.max(0,Math.min(1,value));viewButtons();},
+  setPose(mode,pose){
+   const position=new T.Vector3(pose.x,pose.y,pose.z||0).applyQuaternion(camera.quaternion);
+   const rotation=new T.Quaternion().setFromEuler(new T.Euler(pose.pitch,pose.yaw,pose.roll,'YXZ'));
+   if(mode==='part')partPose.set(state.part,{position,rotation});
+   else{wholePose.position.copy(position);wholePose.rotation.copy(rotation);}
+  },
+  resetPose(){wholePose.position.set(0,0,0);wholePose.rotation.identity();partPose.clear();zoomFactor=1;yaw=.42;pitch=.12;},
+  selectedPart(){return state.part;},
+  poseSnapshot(){return {whole:{position:wholePose.position.toArray(),rotation:wholePose.rotation.toArray()},parts:[...partPose].map(([id,p])=>({id,position:p.position.toArray(),rotation:p.rotation.toArray()}))};}
+ };
+ root.addEventListener('raptor-hand-pose',e=>{const p=e.detail;if(p&&Number.isFinite(p.x))root.raptorHandControl.setPose(p.mode,p);});
+ let w=0,h=0;const ro=new ResizeObserver(()=>{w=stage.clientWidth;h=stage.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();});ro.observe(stage);
+ const watch=new MutationObserver(()=>{colors();});watch.observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme','data-color-mode']});
+ function placeLabels(){if(!w)return;const show=new Set(state.explode?parts.map(p=>p.id):['mount','fuelFeed','oxyFeed','fuelPB','oxyPB','fuelPump','oxyPump','injector','chamber','throat','nozzle','cooling']);show.add(state.part);const labels=[];parts.forEach(p=>{p.tag.hidden=!state.labels||!show.has(p.id);if(p.tag.hidden)return;const v=p.g.localToWorld(p.anchor.clone()).project(camera);if(v.z>1||v.z<-1){p.tag.hidden=true;return;}labels.push({p,x:(v.x+1)*w/2,y:(1-v.y)*h/2});});const left=labels.filter(l=>l.x<w/2),right=labels.filter(l=>l.x>=w/2);[left,right].forEach((list,side)=>{list.sort((a,b)=>a.y-b.y);let prev=44;list.forEach(l=>{const tw=l.p.tag.offsetWidth||140;let x=side?Math.min(w-tw-3,l.x+12):Math.max(2,l.x-tw-12),y=Math.max(prev+24,Math.min(h-44,l.y));l.p.tag.style.left=Math.max(2,Math.min(w-tw-2,x))+'px';l.p.tag.style.top=y+'px';prev=y;});if(list.length){let overflow=prev-(h-40);if(overflow>0)list.slice().reverse().forEach(l=>{let y=parseFloat(l.p.tag.style.top)-overflow;l.p.tag.style.top=y+'px';});}});}
+ function frame(time){if(disposed)return;const dt=Math.min(.05,(time-lastTime)/1000||.016);lastTime=time;if(state.play)flowTime+=dt*(state.throttle/80);const blend=reduced?1:1-Math.exp(-dt*7);explodeNow+=(state.explode-explodeNow)*blend;parts.forEach(p=>{p.g.position.copy(p.base).addScaledVector(p.offset,explodeNow);
+   const hp=partPose.get(p.id),q=hp?hp.rotation:new T.Quaternion();p.g.quaternion.slerp(q,blend);
+   if(hp)p.g.position.add(hp.position).add(p.anchor).sub(p.anchor.clone().applyQuaternion(p.g.quaternion));
+   const a=p.base,b=p.g.position;p.guide.geometry.setFromPoints([a,b]);p.guide.computeLineDistances();p.guide.visible=explodeNow>.05;});pivot.rotation.z=-state.gimbal*Math.PI/180;
+  const wideFactor=w<500?1.1:1;distance=(16.2+explodeNow*2.4)*zoomFactor*wideFactor;const target=new T.Vector3(0,-.15+explodeNow*.75,0);camera.position.set(Math.sin(yaw)*Math.cos(pitch)*distance,target.y+Math.sin(pitch)*distance,Math.cos(yaw)*Math.cos(pitch)*distance);camera.lookAt(target);
+  if(state.play)rotors.forEach((r,i)=>r.rotation.y+=dt*(5+i*.35)*(state.throttle/80));paths.forEach(p=>p.dots.forEach((d,i)=>{const t=((flowTime*.25+i/p.dots.length)%1);d.position.copy(p.curve.getPointAt(t));const split=p.kind==='fuel'?Math.sqrt(4.6/(1+state.mix)):Math.sqrt(state.mix*4.6/(3.6*(1+state.mix)));d.scale.setScalar((.8+state.throttle*.004)*split);}));
+  plume.visible=explodeNow<.2;const len=plume.userData.len||2.6,spread=plume.userData.spread||.2;exhaustDots.forEach((d,i)=>{const t=(flowTime*.65+i/exhaustDots.length)%1,a=i*2.399963,r=(.21*Math.sqrt(state.expansion)*.65+spread*t)*Math.sqrt((i%19)/19);d.position.set(r*Math.cos(a),-t*len,r*Math.sin(a));d.material.opacity=(1-t)*.5;});
+  modelTransform.position.lerp(wholePose.position,blend);modelTransform.quaternion.slerp(wholePose.rotation,blend);if(dirty)recolor();scene.updateMatrixWorld();placeLabels();renderer.render(scene,camera);requestAnimationFrame(frame);
+ }
+ restore({...state});values();viewButtons();select(state.part,false);rebuildNozzle();updatePhysics();requestAnimationFrame(frame);
+ // A small read-only snapshot supports validation of the assembled educational model.
+ root.raptorSnapshot=()=>({assemblies:parts.map(p=>({id:p.id,name:p.name,position:p.g.position.toArray()})),parameters:{...state},physics:{...physics},meshCount:pickables.length,canvasSize:{w,h},camera:camera.position.toArray()});
+ window.addEventListener('pagehide',()=>{disposed=true;ro.disconnect();watch.disconnect();renderer.dispose();},{once:true});
+})();

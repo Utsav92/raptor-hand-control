@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Raptor · left-hand control</title>
+  <link rel="stylesheet" href="./controls.css">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <header class="app-header"><span>RAPTOR / ENGINE LAB</span><span class="text-small">Local computer vision · no video uploads</span></header>
+  <main class="app-layout">
+    <section class="model-column" aria-label="Raptor engine explainer"><div id="raptor-lab">
+  <h2>Raptor · inside the engine</h2>
+  <div class="viz-row text-small"><span>Conceptual major assemblies</span><span>•</span><span>Full-flow staged combustion</span><span>•</span><span>Illustrative physics</span></div>
+  <div class="viz-row r-toolbar">
+    <button class="btn" type="button" data-view="0" aria-pressed="true">Assembled</button>
+    <button class="btn" type="button" data-view="1" aria-pressed="false">Exploded</button>
+    <label class="form-check"><input id="r-cut" class="form-check-input" type="checkbox"><span class="form-check-label">Cutaway</span></label>
+    <label class="form-check"><input id="r-labels" class="form-check-input" type="checkbox" checked><span class="form-check-label">Labels</span></label>
+    <button id="r-play" class="btn btn-ghost" type="button" aria-pressed="false">Animate flow</button>
+    <label class="form-label" for="r-mode">Color by</label><select id="r-mode" class="form-select"><option value="flow">Flow circuit</option><option value="heat">Heat load</option></select>
+  </div>
+  <div class="r-stage" id="r-stage">
+    <div id="r-canvas"></div><div id="r-tags"></div>
+    <div class="r-legend text-small"><span><i class="r-swatch r-fuel"></i>CH₄ / fuel-rich gas</span><span><i class="r-swatch r-oxy"></i>O₂ / oxygen-rich gas</span><span><i class="r-swatch r-hot"></i>Main combustion</span></div>
+    <div class="r-help text-small">Drag to orbit · scroll / pinch to zoom · click a part</div>
+    <div id="r-error" role="alert" hidden></div>
+  </div>
+  <div class="viz-row r-part-row"><label class="form-label" for="r-part">Inspect</label><select class="form-select" id="r-part" aria-label="Inspect an engine assembly"></select></div>
+  <div id="r-detail" class="r-detail" aria-live="polite"></div>
+  <div class="r-metrics tabular-nums" aria-live="polite"><span>Chamber <strong id="r-pc"></strong></span><span>Thrust index <strong id="r-thrust"></strong></span><span>Wall load <strong id="r-wall"></strong></span></div>
+  <div class="viz-controls r-controls">
+    <label class="form-label" for="r-throttle">Throttle <output id="r-throttle-v" class="tabular-nums"></output><input class="form-range" id="r-throttle" type="range" min="40" max="100" value="80" step="1"></label>
+    <label class="form-label" for="r-mix">Oxygen / methane mass ratio <output id="r-mix-v" class="tabular-nums"></output><input class="form-range" id="r-mix" type="range" min="2.8" max="4.4" value="3.6" step="0.05"></label>
+    <label class="form-label" for="r-ambient">Ambient pressure <output id="r-ambient-v" class="tabular-nums"></output><input class="form-range" id="r-ambient" type="range" min="0" max="101.3" value="101.3" step="0.1"></label>
+    <label class="form-label" for="r-expansion">Nozzle area ratio Aₑ / Aₜ <output id="r-expansion-v" class="tabular-nums"></output><input class="form-range" id="r-expansion" type="range" min="15" max="100" value="35" step="1"></label>
+    <label class="form-label" for="r-cooling">Cooling effectiveness <output id="r-cooling-v" class="tabular-nums"></output><input class="form-range" id="r-cooling" type="range" min="30" max="100" value="85" step="1"></label>
+    <label class="form-label" for="r-gimbal">Gimbal angle <output id="r-gimbal-v" class="tabular-nums"></output><input class="form-range" id="r-gimbal" type="range" min="-10" max="10" value="0" step="0.5"></label>
+  </div>
+  <div id="r-response" class="r-response" aria-live="polite"></div>
+  <div class="viz-row text-small r-foot"><span id="r-regime"></span><span>•</span><span id="r-vector"></span></div>
+  <div class="text-small text-muted">Thrust / wall indices: default = 100 · heat colors: relative load · slider ranges are demonstrations, not Raptor limits.</div>
+</div>
+<style>
+  #raptor-lab{width:100%;color:var(--foreground)}
+  #raptor-lab .r-toolbar{margin:12px 0;gap:8px}
+  #raptor-lab .r-stage{position:relative;height:510px;overflow:hidden;touch-action:none}
+  #raptor-lab #r-canvas,#raptor-lab #r-tags{position:absolute;inset:0}
+  #raptor-lab canvas{width:100%;height:100%;display:block;touch-action:none}
+  #raptor-lab #r-tags{pointer-events:none}
+  #raptor-lab .r-tag{position:absolute;transform:translateY(-50%);color:var(--foreground);pointer-events:auto;white-space:nowrap}
+  #raptor-lab .r-tag .r-tag-text{display:inline-block;background:var(--background);padding:1px 3px}
+  #raptor-lab .r-tag.is-active .r-tag-text{background:var(--primary);color:var(--primary-foreground)}
+  #raptor-lab .r-legend{position:absolute;left:0;top:4px;display:flex;flex-wrap:wrap;gap:12px;pointer-events:none}
+  #raptor-lab .r-legend span{display:flex;gap:5px;align-items:center}
+  #raptor-lab .r-swatch{width:9px;height:9px;display:inline-block}
+  #raptor-lab .r-fuel{background:var(--viz-series-1)}
+  #raptor-lab .r-oxy{background:var(--viz-series-2)}
+  #raptor-lab .r-hot{background:var(--viz-series-3)}
+  #raptor-lab .r-help{position:absolute;bottom:3px;left:0;color:var(--muted-foreground)}
+  #raptor-lab .r-part-row{margin:8px 0;gap:10px}
+  #raptor-lab .r-detail{min-height:42px;margin-bottom:8px}
+  #raptor-lab .r-metrics{display:flex;flex-wrap:wrap;gap:10px 26px;margin:12px 0}
+  #raptor-lab .r-metrics strong{font-weight:500}
+  #raptor-lab .r-controls{margin:12px 0}
+  #raptor-lab .r-controls output{float:right;margin-left:12px}
+  #raptor-lab .r-response{min-height:42px}
+  #raptor-lab .r-foot{margin:8px 0;gap:7px}
+  #raptor-lab #r-error{position:absolute;inset:80px 20px auto;color:var(--foreground)}
+  @media(max-width:500px){#raptor-lab .r-stage{height:435px}#raptor-lab .r-tag-name{display:none}#raptor-lab .r-legend{gap:5px 12px}}
+</style>
+<script src="./assets/three.min.js"></script>
+<script src="./engine.js"></script></section>
+    <aside class="hand-column" aria-labelledby="hand-title">
+      <h2 id="hand-title">Your left hand is the controller</h2>
+      <p class="text-muted">Open your hand to explode the engine. Close it to assemble. Turn your palm to rotate; move your hand to reposition.</p>
+      <div class="camera-preview"><video id="hand-video" autoplay playsinline muted aria-label="Mirrored camera preview"></video><canvas id="hand-overlay" width="640" height="480" aria-label="Detected hand landmarks"></canvas><div id="camera-placeholder">Camera off</div></div>
+      <div class="camera-actions"><button id="camera-start" class="btn btn-primary" type="button" disabled>Start camera</button><button id="camera-stop" class="btn" type="button" disabled>Stop</button></div>
+      <p id="hand-status" role="status" aria-live="polite">Loading hand tracker…</p>
+      <div class="hand-readings"><span>Gesture <strong id="hand-gesture">—</strong></span><span>Open <strong id="hand-open">—</strong></span></div>
+      <label class="form-label" for="hand-target">Move and rotate</label>
+      <select id="hand-target" class="form-select"><option value="engine">Whole engine</option><option value="part">Selected assembly</option></select>
+      <p class="text-small text-muted" id="target-help">All assemblies move together. Open/close always controls the full exploded view.</p>
+      <div class="camera-actions"><button id="hand-recenter" class="btn" type="button">Recenter hand</button><button id="hand-reset" class="btn btn-ghost" type="button">Reset view</button></div>
+      <label class="form-check"><input id="hand-swap" class="form-check-input" type="checkbox"><span class="form-check-label">Swap left/right labels</span></label>
+      <p class="text-small text-muted">Use the swap option if your camera already mirrors its image. Keep your wrist and fingertips visible. Tracking loss freezes the view; mouse controls still work.</p>
+      <details><summary>How the controls work</summary><p>Hold an open palm for a moment to separate the assemblies, or a fist to reassemble them. Intermediate finger positions preserve the last stable state.</p><p>When tracking begins, your palm position becomes the neutral pose. Turning it shows other sides of the engine; tilting it changes elevation. Moving left, right, up or down moves the model. Moving closer or farther changes its depth.</p><p>Choose “Selected assembly,” then choose a part under Inspect, to manipulate that part independently. Changing the selected part recenters the hand automatically.</p><p>Camera frames are processed on this computer in a worker. Neither frames nor landmarks are sent to a server. Stop turns off the camera.</p></details>
+      <p class="text-small text-muted">Tracking: <a href="https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js" target="_blank" rel="noreferrer">MediaPipe Hand Landmarker</a> · geometry and performance remain educational approximations.</p>
+    </aside>
+  </main>
+  <script type="module" src="./hand-control.js"></script>
+</body>
+</html>

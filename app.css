@@ -1,0 +1,29 @@
+:root{--font-size-base:14px}
+*{box-sizing:border-box}
+body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--foreground);background:var(--background)}
+.app-header{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:22px 28px;border-bottom:1px solid var(--border);font-weight:500}
+.app-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:32px;max-width:1440px;margin:auto;padding:28px}
+.model-column{min-width:0}
+.hand-column{min-width:0}
+.hand-column h2{margin-top:0}
+.hand-column p{line-height:1.55}
+.camera-preview{position:relative;width:100%;aspect-ratio:4/3;overflow:hidden;border-radius:12px;background:var(--muted);margin:18px 0 12px}
+.camera-preview video,.camera-preview canvas{position:absolute;width:100%;height:100%;object-fit:contain;inset:0}
+.camera-preview video{transform:scaleX(-1)}
+#camera-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted-foreground)}
+#camera-placeholder[hidden]{display:none}
+.camera-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.hand-readings{display:flex;justify-content:space-between;gap:12px;margin:16px 0 22px}
+.hand-readings strong{font-weight:500;font-variant-numeric:tabular-nums}
+#hand-status{min-height:44px}
+.hand-column details{margin:22px 0}
+.hand-column summary{cursor:pointer;font-weight:500}
+#raptor-lab .r-stage{height:650px}
+#raptor-lab .r-toolbar .form-select{width:auto}
+#raptor-lab .r-part-row .form-select{flex:1;width:auto;min-width:0}
+#raptor-lab .r-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+#raptor-lab .r-controls>.form-label{min-width:0}
+#raptor-lab .r-controls output{float:none;margin:0}
+.r-tag{cursor:pointer}
+@media(max-width:950px){.app-layout{grid-template-columns:minmax(0,1fr);padding:20px}.hand-column{max-width:600px}.camera-preview{max-width:420px}#raptor-lab .r-stage{height:550px}}
+@media(max-width:520px){.app-header{padding:18px}.app-layout{padding:16px;gap:28px}#raptor-lab .r-stage{height:445px}#raptor-lab .r-controls{grid-template-columns:1fr}.app-header .text-small{width:100%}}
